@@ -14,6 +14,13 @@
  * limitations under the License.
  */
 
+using IdentityModel;
+using IdentityServer3.Core.Configuration;
+using IdentityServer3.Core.Extensions;
+using IdentityServer3.Core.Logging;
+using IdentityServer3.Core.Models;
+using IdentityServer3.Core.Services;
+using Microsoft.Owin;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -21,18 +28,13 @@ using System.IdentityModel.Selectors;
 using System.IdentityModel.Tokens;
 using System.Linq;
 using System.Security.Claims;
+using System.Security.Cryptography.X509Certificates;
 using System.ServiceModel.Security;
 using System.Threading.Tasks;
-using Thinktecture.IdentityModel.Extensions;
-using Thinktecture.IdentityServer.Core.Configuration;
-using Thinktecture.IdentityServer.Core.Extensions;
-using Thinktecture.IdentityServer.Core.Logging;
-using Thinktecture.IdentityServer.Core.Models;
-using Thinktecture.IdentityServer.Core.Services;
 
 #pragma warning disable 1591
 
-namespace Thinktecture.IdentityServer.Core.Validation
+namespace IdentityServer3.Core.Validation
 {
     [EditorBrowsable(EditorBrowsableState.Never)]
     public class TokenValidator
@@ -42,9 +44,12 @@ namespace Thinktecture.IdentityServer.Core.Validation
         private readonly ITokenHandleStore _tokenHandles;
         private readonly ICustomTokenValidator _customValidator;
         private readonly IClientStore _clients;
+        private readonly IOwinContext _context;
+        private readonly ISigningKeyService _keyService;
 
         private readonly TokenValidationLog _log;
 
+        // todo: remove in 3.0.0
         public TokenValidator(IdentityServerOptions options, IClientStore clients, ITokenHandleStore tokenHandles, ICustomTokenValidator customValidator)
         {
             _options = options;
@@ -55,9 +60,41 @@ namespace Thinktecture.IdentityServer.Core.Validation
             _log = new TokenValidationLog();
         }
 
+        public TokenValidator(IdentityServerOptions options, IClientStore clients, ITokenHandleStore tokenHandles, ICustomTokenValidator customValidator, OwinEnvironmentService owinEnvironment, ISigningKeyService keyService)
+        {
+            _options = options;
+            _clients = clients;
+            _tokenHandles = tokenHandles;
+            _customValidator = customValidator;
+            _context = new OwinContext(owinEnvironment.Environment);
+            _keyService = keyService;
+
+            _log = new TokenValidationLog();
+        }
+
+        // todo: remove in 3.0.0
+        private string IssuerUri
+        {
+            get
+            {
+                if (_context != null)
+                {
+                    return _context.GetIdentityServerIssuerUri();
+                }
+
+                return _options.DynamicallyCalculatedIssuerUri;
+            }
+        }
+
         public virtual async Task<TokenValidationResult> ValidateIdentityTokenAsync(string token, string clientId = null, bool validateLifetime = true)
         {
             Logger.Info("Start identity token validation");
+
+            if (token.Length > _options.InputLengthRestrictions.Jwt)
+            {
+                Logger.Error("JWT too long");
+                return Invalid(Constants.ProtectedResourceErrors.InvalidToken);
+            }
 
             if (clientId.IsMissing())
             {
@@ -81,10 +118,10 @@ namespace Thinktecture.IdentityServer.Core.Validation
             }
 
             _log.ClientName = client.ClientName;
-            
-            var signingKey = new X509SecurityKey(_options.SigningCertificate);
-            var result = await ValidateJwtAsync(token, clientId, signingKey, validateLifetime);
-            
+
+            var certs = await _keyService.GetPublicKeysAsync();
+            var result = await ValidateJwtAsync(token, clientId, certs, validateLifetime);
+
             result.Client = client;
 
             if (result.IsError)
@@ -93,23 +130,17 @@ namespace Thinktecture.IdentityServer.Core.Validation
                 return result;
             }
 
-            if (_options.LoggingOptions.IncludeSensitiveDataInLogs)
-            {
-                _log.Claims = result.Claims.ToClaimsDictionary();
-            }
+            _log.Claims = result.Claims.ToClaimsDictionary();
 
             var customResult = await _customValidator.ValidateIdentityTokenAsync(result);
 
             if (customResult.IsError)
             {
-                LogError("Custom validator failed: " + customResult.Error ?? "unknown");
+                LogError("Custom validator failed: " + (customResult.Error ?? "unknown"));
                 return customResult;
             }
 
-            if (_options.LoggingOptions.IncludeSensitiveDataInLogs)
-            {
-                _log.Claims = customResult.Claims.ToClaimsDictionary();
-            }
+            _log.Claims = customResult.Claims.ToClaimsDictionary();
 
             LogSuccess();
             return customResult;
@@ -121,27 +152,48 @@ namespace Thinktecture.IdentityServer.Core.Validation
 
             _log.ExpectedScope = expectedScope;
             _log.ValidateLifetime = true;
-        
+
             TokenValidationResult result;
 
             if (token.Contains("."))
             {
+                if (token.Length > _options.InputLengthRestrictions.Jwt)
+                {
+                    Logger.Error("JWT too long");
+
+                    return new TokenValidationResult
+                    {
+                        IsError = true,
+                        Error = Constants.ProtectedResourceErrors.InvalidToken,
+                        ErrorDescription = "Token too long"
+                    };
+                }
+
                 _log.AccessTokenType = AccessTokenType.Jwt.ToString();
                 result = await ValidateJwtAsync(
                     token,
-                    string.Format(Constants.AccessTokenAudience, _options.IssuerUri.EnsureTrailingSlash()),
-                    new X509SecurityKey(_options.SigningCertificate));
+                    string.Format(Constants.AccessTokenAudience, IssuerUri.EnsureTrailingSlash()),
+                    await _keyService.GetPublicKeysAsync());
             }
             else
             {
+                if (token.Length > _options.InputLengthRestrictions.TokenHandle)
+                {
+                    Logger.Error("token handle too long");
+
+                    return new TokenValidationResult
+                    {
+                        IsError = true,
+                        Error = Constants.ProtectedResourceErrors.InvalidToken,
+                        ErrorDescription = "Token too long"
+                    };
+                }
+
                 _log.AccessTokenType = AccessTokenType.Reference.ToString();
                 result = await ValidateReferenceAccessTokenAsync(token);
             }
 
-            if (_options.LoggingOptions.IncludeSensitiveDataInLogs)
-            {
-                _log.Claims = result.Claims.ToClaimsDictionary();
-            }
+            _log.Claims = result.Claims.ToClaimsDictionary();
 
             if (result.IsError)
             {
@@ -162,21 +214,18 @@ namespace Thinktecture.IdentityServer.Core.Validation
 
             if (customResult.IsError)
             {
-                LogError("Custom validator failed: " + customResult.Error ?? "unknown");
+                LogError("Custom validator failed: " + (customResult.Error ?? "unknown"));
                 return customResult;
             }
 
             // add claims again after custom validation
-            if (_options.LoggingOptions.IncludeSensitiveDataInLogs)
-            {
-                _log.Claims = customResult.Claims.ToClaimsDictionary();
-            }
+            _log.Claims = customResult.Claims.ToClaimsDictionary();
 
             LogSuccess();
             return customResult;
         }
 
-        public virtual Task<TokenValidationResult> ValidateJwtAsync(string jwt, string audience, SecurityKey signingKey, bool validateLifetime = true)
+        private async Task<TokenValidationResult> ValidateJwtAsync(string jwt, string audience, IEnumerable<X509Certificate2> signingCertificates, bool validateLifetime = true)
         {
             var handler = new JwtSecurityTokenHandler
             {
@@ -188,10 +237,12 @@ namespace Thinktecture.IdentityServer.Core.Validation
                     }
             };
 
+            var keys = (from c in signingCertificates select new X509SecurityKey(c)).ToList();
+
             var parameters = new TokenValidationParameters
             {
-                ValidIssuer = _options.IssuerUri,
-                IssuerSigningKey = signingKey,
+                ValidIssuer = IssuerUri,
+                IssuerSigningKeys = keys,
                 ValidateLifetime = validateLifetime,
                 ValidAudience = audience
             };
@@ -208,20 +259,35 @@ namespace Thinktecture.IdentityServer.Core.Validation
                     _log.JwtId = jwtId.Value;
                 }
 
-                return Task.FromResult(new TokenValidationResult
+                // load the client that belongs to the client_id claim
+                Client client = null;
+                var clientId = id.FindFirst(Constants.ClaimTypes.ClientId);
+                if (clientId != null)
                 {
+                    client = await _clients.FindClientByIdAsync(clientId.Value);
+                    if (client == null)
+                    {
+                        throw new InvalidOperationException("Client does not exist anymore.");
+                    }
+                }
+
+                return new TokenValidationResult
+                {
+                    IsError = false,
+
                     Claims = id.Claims,
+                    Client = client,
                     Jwt = jwt
-                });
+                };
             }
             catch (Exception ex)
             {
-                Logger.ErrorException("JWT token validation error", ex);
-                return Task.FromResult(Invalid(Constants.ProtectedResourceErrors.InvalidToken));
+                Logger.InfoException("JWT token validation error", ex);
+                return Invalid(Constants.ProtectedResourceErrors.InvalidToken);
             }
         }
 
-        protected virtual async Task<TokenValidationResult> ValidateReferenceAccessTokenAsync(string tokenHandle)
+        private async Task<TokenValidationResult> ValidateReferenceAccessTokenAsync(string tokenHandle)
         {
             _log.TokenHandle = tokenHandle;
             var token = await _tokenHandles.GetAsync(tokenHandle);
@@ -250,13 +316,16 @@ namespace Thinktecture.IdentityServer.Core.Validation
 
             return new TokenValidationResult
             {
+                IsError = false,
+
+                Client = token.Client,
                 Claims = ReferenceTokenToClaims(token),
                 ReferenceToken = token,
                 ReferenceTokenId = tokenHandle
             };
         }
 
-        protected virtual IEnumerable<Claim> ReferenceTokenToClaims(Token token)
+        private IEnumerable<Claim> ReferenceTokenToClaims(Token token)
         {
             var claims = new List<Claim>
             {
@@ -271,15 +340,23 @@ namespace Thinktecture.IdentityServer.Core.Validation
             return claims;
         }
 
-        protected virtual string GetClientIdFromJwt(string token)
+        private string GetClientIdFromJwt(string token)
         {
-            var jwt = new JwtSecurityToken(token);
-            var clientId = jwt.Audiences.FirstOrDefault();
+            try
+            {
+                var jwt = new JwtSecurityToken(token);
+                var clientId = jwt.Audiences.FirstOrDefault();
 
-            return clientId;
+                return clientId;
+            }
+            catch (Exception ex)
+            {
+                Logger.ErrorException("Malformed JWT token", ex);
+                return null;
+            }
         }
 
-        protected virtual TokenValidationResult Invalid(string error)
+        private TokenValidationResult Invalid(string error)
         {
             return new TokenValidationResult
             {

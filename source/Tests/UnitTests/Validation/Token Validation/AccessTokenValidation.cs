@@ -15,22 +15,21 @@
  */
 
 using FluentAssertions;
+using IdentityServer3.Core;
+using IdentityServer3.Core.Configuration;
+using IdentityServer3.Core.Extensions;
+using IdentityServer3.Core.Models;
+using IdentityServer3.Core.Services;
+using IdentityServer3.Core.Services.InMemory;
 using Moq;
 using System;
+using System.Collections.Generic;
 using System.IdentityModel.Tokens;
 using System.Linq;
-using System.Security.Claims;
 using System.Threading.Tasks;
-using Thinktecture.IdentityModel.Tokens;
-using Thinktecture.IdentityServer.Core;
-using Thinktecture.IdentityServer.Core.Extensions;
-using Thinktecture.IdentityServer.Core.Models;
-using Thinktecture.IdentityServer.Core.Services;
-using Thinktecture.IdentityServer.Core.Services.Default;
-using Thinktecture.IdentityServer.Core.Services.InMemory;
 using Xunit;
 
-namespace Thinktecture.IdentityServer.Tests.Validation.Tokens
+namespace IdentityServer3.Tests.Validation.Tokens
 {
     public class AccessTokenValidation : IDisposable
     {
@@ -40,7 +39,7 @@ namespace Thinktecture.IdentityServer.Tests.Validation.Tokens
 
         static AccessTokenValidation()
         {
-            JwtSecurityTokenHandler.InboundClaimTypeMap = ClaimMappings.None;
+            JwtSecurityTokenHandler.InboundClaimTypeMap = new Dictionary<string, string>();
         }
 
         DateTimeOffset now;
@@ -139,6 +138,21 @@ namespace Thinktecture.IdentityServer.Tests.Validation.Tokens
 
         [Fact]
         [Trait("Category", Category)]
+        public async Task Reference_Token_Too_Long()
+        {
+            var store = new InMemoryTokenHandleStore();
+            var validator = Factory.CreateTokenValidator(store);
+            var options = new IdentityServerOptions();
+
+            var longToken = "x".Repeat(options.InputLengthRestrictions.TokenHandle + 1);
+            var result = await validator.ValidateAccessTokenAsync(longToken);
+
+            result.IsError.Should().BeTrue();
+            result.Error.Should().Be(Constants.ProtectedResourceErrors.InvalidToken);
+        }
+
+        [Fact]
+        [Trait("Category", Category)]
         public async Task Expired_Reference_Token()
         {
             now = DateTimeOffset.UtcNow;
@@ -176,7 +190,7 @@ namespace Thinktecture.IdentityServer.Tests.Validation.Tokens
         [Trait("Category", Category)]
         public async Task Valid_JWT_Token()
         {
-            var signer = new DefaultTokenSigningService(TestIdentityServerOptions.Create());
+            var signer = Factory.CreateDefaultTokenSigningService();
             var jwt = await signer.SignTokenAsync(TokenFactory.CreateAccessToken(new Client { ClientId = "roclient" }, "valid", 600, "read", "write"));
 
             var validator = Factory.CreateTokenValidator(null);
@@ -189,7 +203,7 @@ namespace Thinktecture.IdentityServer.Tests.Validation.Tokens
         [Trait("Category", Category)]
         public async Task JWT_Token_invalid_Issuer()
         {
-            var signer = new DefaultTokenSigningService(TestIdentityServerOptions.Create());
+            var signer = Factory.CreateDefaultTokenSigningService();
             var token = TokenFactory.CreateAccessToken(new Client { ClientId = "roclient" }, "valid", 600, "read", "write");
             token.Issuer = "invalid";
             var jwt = await signer.SignTokenAsync(token);
@@ -203,9 +217,23 @@ namespace Thinktecture.IdentityServer.Tests.Validation.Tokens
 
         [Fact]
         [Trait("Category", Category)]
+        public async Task JWT_Token_Too_Long()
+        {
+            var signer = Factory.CreateDefaultTokenSigningService();
+            var jwt = await signer.SignTokenAsync(TokenFactory.CreateAccessTokenLong(new Client { ClientId = "roclient" }, "valid", 600, 1000, "read", "write"));
+            
+            var validator = Factory.CreateTokenValidator(null);
+            var result = await validator.ValidateAccessTokenAsync(jwt);
+
+            result.IsError.Should().BeTrue();
+            result.Error.Should().Be(Constants.ProtectedResourceErrors.InvalidToken);
+        }
+
+        [Fact]
+        [Trait("Category", Category)]
         public async Task JWT_Token_invalid_Audience()
         {
-            var signer = new DefaultTokenSigningService(TestIdentityServerOptions.Create());
+            var signer = Factory.CreateDefaultTokenSigningService();
             var token = TokenFactory.CreateAccessToken(new Client { ClientId = "roclient" }, "valid", 600, "read", "write");
             token.Audience = "invalid";
             var jwt = await signer.SignTokenAsync(token);
@@ -222,7 +250,9 @@ namespace Thinktecture.IdentityServer.Tests.Validation.Tokens
         public async Task Valid_AccessToken_but_User_not_active()
         {
             var mock = new Mock<IUserService>();
-            mock.Setup(u => u.IsActiveAsync(It.IsAny<ClaimsPrincipal>())).Returns(Task.FromResult(false));                        
+            mock.Setup(u => u.IsActiveAsync(It.IsAny<IsActiveContext>())).Callback<IsActiveContext>(ctx=>{
+                ctx.IsActive = false;
+            }).Returns(Task.FromResult(0));                        
 
             var store = new InMemoryTokenHandleStore();
             var validator = Factory.CreateTokenValidator(tokenStore: store, users: mock.Object);

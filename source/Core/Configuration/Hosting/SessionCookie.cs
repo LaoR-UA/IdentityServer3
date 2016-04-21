@@ -14,15 +14,15 @@
  * limitations under the License.
  */
 
+using IdentityModel;
+using IdentityServer3.Core.Extensions;
 using Microsoft.Owin;
 using System;
 using System.ComponentModel;
-using Thinktecture.IdentityModel;
-using Thinktecture.IdentityServer.Core.Extensions;
 
 #pragma warning disable 1591
 
-namespace Thinktecture.IdentityServer.Core.Configuration.Hosting
+namespace IdentityServer3.Core.Configuration.Hosting
 {
     [EditorBrowsable(EditorBrowsableState.Never)]
     public class SessionCookie
@@ -46,11 +46,14 @@ namespace Thinktecture.IdentityServer.Core.Configuration.Hosting
         private Microsoft.Owin.CookieOptions CreateCookieOptions(bool? persistent, DateTimeOffset? expires = null)
         {
             var path = context.Request.Environment.GetIdentityServerBasePath().CleanUrlPath();
+            var secure =
+                identityServerOptions.AuthenticationOptions.CookieOptions.SecureMode == CookieSecureMode.Always ||
+                context.Request.Scheme == Uri.UriSchemeHttps;
 
             var options = new Microsoft.Owin.CookieOptions
             {
                 HttpOnly = false,
-                Secure = context.Request.IsSecure,
+                Secure = secure,
                 Path = path
             };
 

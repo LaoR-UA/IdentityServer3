@@ -15,18 +15,19 @@
  */
 
 using FluentAssertions;
+using IdentityServer3.Core;
 using System.Collections.Specialized;
 using System.Threading.Tasks;
-using Thinktecture.IdentityServer.Core;
 using Xunit;
 
-namespace Thinktecture.IdentityServer.Tests.Validation.AuthorizeRequest
+namespace IdentityServer3.Tests.Validation.AuthorizeRequest
 {
-    
     public class Authorize_ProtocolValidation_Valid
     {
+        const string Category = "AuthorizeRequest Protocol Validation - Valid";
+
         [Fact]
-        [Trait("Category", "AuthorizeRequest Protocol Validation - Valid")]
+        [Trait("Category", Category)]
         public async Task Valid_OpenId_Code_Request()
         {
             var parameters = new NameValueCollection();
@@ -42,7 +43,58 @@ namespace Thinktecture.IdentityServer.Tests.Validation.AuthorizeRequest
         }
 
         [Fact]
-        [Trait("Category", "AuthorizeRequest Protocol Validation - Valid")]
+        [Trait("Category", Category)]
+        public async Task Valid_OpenId_CodeIdToken_Request()
+        {
+            var parameters = new NameValueCollection();
+            parameters.Add(Constants.AuthorizeRequest.ClientId, "hybridclient");
+            parameters.Add(Constants.AuthorizeRequest.Scope, "openid");
+            parameters.Add(Constants.AuthorizeRequest.RedirectUri, "https://server/cb");
+            parameters.Add(Constants.AuthorizeRequest.ResponseType, Constants.ResponseTypes.CodeIdToken);
+            parameters.Add(Constants.AuthorizeRequest.Nonce, "nonce");
+
+            var validator = Factory.CreateAuthorizeRequestValidator();
+            var result = await validator.ValidateAsync(parameters);
+
+            result.IsError.Should().Be(false);
+        }
+
+        [Fact]
+        [Trait("Category", Category)]
+        public async Task Valid_OpenId_CodeIdToken_with_NoTokenViaBrowser_Request()
+        {
+            var parameters = new NameValueCollection();
+            parameters.Add(Constants.AuthorizeRequest.ClientId, "hybridclient.nobrowser");
+            parameters.Add(Constants.AuthorizeRequest.Scope, "openid");
+            parameters.Add(Constants.AuthorizeRequest.RedirectUri, "https://server/cb");
+            parameters.Add(Constants.AuthorizeRequest.ResponseType, Constants.ResponseTypes.CodeIdToken);
+            parameters.Add(Constants.AuthorizeRequest.Nonce, "nonce");
+
+            var validator = Factory.CreateAuthorizeRequestValidator();
+            var result = await validator.ValidateAsync(parameters);
+
+            result.IsError.Should().Be(false);
+        }
+
+        [Fact]
+        [Trait("Category", Category)]
+        public async Task Valid_OpenId_CodeIdTokenToken_Request()
+        {
+            var parameters = new NameValueCollection();
+            parameters.Add(Constants.AuthorizeRequest.ClientId, "hybridclient");
+            parameters.Add(Constants.AuthorizeRequest.Scope, "openid");
+            parameters.Add(Constants.AuthorizeRequest.RedirectUri, "https://server/cb");
+            parameters.Add(Constants.AuthorizeRequest.ResponseType, Constants.ResponseTypes.CodeIdTokenToken);
+            parameters.Add(Constants.AuthorizeRequest.Nonce, "nonce");
+
+            var validator = Factory.CreateAuthorizeRequestValidator();
+            var result = await validator.ValidateAsync(parameters);
+
+            result.IsError.Should().Be(false);
+        }
+
+        [Fact]
+        [Trait("Category", Category)]
         public async Task Valid_Resource_Code_Request()
         {
             var parameters = new NameValueCollection();
@@ -58,7 +110,7 @@ namespace Thinktecture.IdentityServer.Tests.Validation.AuthorizeRequest
         }
 
         [Fact]
-        [Trait("Category", "AuthorizeRequest Protocol Validation - Valid")]
+        [Trait("Category", Category)]
         public async Task Valid_Mixed_Code_Request()
         {
             var parameters = new NameValueCollection();
@@ -74,7 +126,7 @@ namespace Thinktecture.IdentityServer.Tests.Validation.AuthorizeRequest
         }
 
         [Fact]
-        [Trait("Category", "AuthorizeRequest Protocol Validation - Valid")]
+        [Trait("Category", Category)]
         public async Task Valid_Resource_Token_Request()
         {
             var parameters = new NameValueCollection();
@@ -90,7 +142,7 @@ namespace Thinktecture.IdentityServer.Tests.Validation.AuthorizeRequest
         }
 
         [Fact]
-        [Trait("Category", "AuthorizeRequest Protocol Validation - Valid")]
+        [Trait("Category", Category)]
         public async Task Valid_OpenId_IdToken_Request()
         {
             var parameters = new NameValueCollection();
@@ -107,7 +159,24 @@ namespace Thinktecture.IdentityServer.Tests.Validation.AuthorizeRequest
         }
 
         [Fact]
-        [Trait("Category", "AuthorizeRequest Protocol Validation - Valid")]
+        [Trait("Category", Category)]
+        public async Task Valid_OpenId_IdToken_with_No_AccessToken_Request()
+        {
+            var parameters = new NameValueCollection();
+            parameters.Add(Constants.AuthorizeRequest.ClientId, "implicitclient.nobrowser");
+            parameters.Add(Constants.AuthorizeRequest.Scope, "openid");
+            parameters.Add(Constants.AuthorizeRequest.RedirectUri, "oob://implicit/cb");
+            parameters.Add(Constants.AuthorizeRequest.ResponseType, Constants.ResponseTypes.IdToken);
+            parameters.Add(Constants.AuthorizeRequest.Nonce, "abc");
+
+            var validator = Factory.CreateAuthorizeRequestValidator();
+            var result = await validator.ValidateAsync(parameters);
+
+            result.IsError.Should().BeFalse();
+        }
+
+        [Fact]
+        [Trait("Category", Category)]
         public async Task Valid_Mixed_IdTokenToken_Request()
         {
             var parameters = new NameValueCollection();
@@ -124,7 +193,7 @@ namespace Thinktecture.IdentityServer.Tests.Validation.AuthorizeRequest
         }
 
         [Fact]
-        [Trait("Category", "AuthorizeRequest Protocol Validation - Valid")]
+        [Trait("Category", Category)]
         public async Task Valid_OpenId_IdToken_With_FormPost_ResponseMode_Request()
         {
             var parameters = new NameValueCollection();
@@ -142,7 +211,7 @@ namespace Thinktecture.IdentityServer.Tests.Validation.AuthorizeRequest
         }
 
         [Fact]
-        [Trait("Category", "AuthorizeRequest Protocol Validation - Valid")]
+        [Trait("Category", Category)]
         public async Task Valid_OpenId_IdToken_Token_With_FormPost_ResponseMode_Request()
         {
             var parameters = new NameValueCollection();

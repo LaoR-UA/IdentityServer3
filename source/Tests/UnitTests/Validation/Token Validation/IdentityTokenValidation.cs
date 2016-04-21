@@ -15,30 +15,29 @@
  */
 
 using FluentAssertions;
+using IdentityServer3.Core;
+using System.Collections.Generic;
 using System.IdentityModel.Tokens;
 using System.Threading.Tasks;
-using Thinktecture.IdentityModel.Tokens;
-using Thinktecture.IdentityServer.Core;
-using Thinktecture.IdentityServer.Core.Services.Default;
 using Xunit;
 
-namespace Thinktecture.IdentityServer.Tests.Validation.Tokens
+namespace IdentityServer3.Tests.Validation.Tokens
 {
-    
+
     public class IdentityTokenValidation
     {
         const string Category = "Identity token validation";
 
         static IdentityTokenValidation()
         {
-            JwtSecurityTokenHandler.InboundClaimTypeMap = ClaimMappings.None;
+            JwtSecurityTokenHandler.InboundClaimTypeMap = new Dictionary<string, string>();
         }
 
         [Fact]
         [Trait("Category", Category)]
         public async Task Valid_IdentityToken_DefaultKeyType()
         {
-            var signer = new DefaultTokenSigningService(TestIdentityServerOptions.Create());
+            var signer = Factory.CreateDefaultTokenSigningService();
             var jwt = await signer.SignTokenAsync(TokenFactory.CreateIdentityToken("roclient", "valid"));
             var validator = Factory.CreateTokenValidator();
 
@@ -50,7 +49,7 @@ namespace Thinktecture.IdentityServer.Tests.Validation.Tokens
         [Trait("Category", Category)]
         public async Task Valid_IdentityToken_DefaultKeyType_no_ClientId_supplied()
         {
-            var signer = new DefaultTokenSigningService(TestIdentityServerOptions.Create());
+            var signer = Factory.CreateDefaultTokenSigningService();
             var jwt = await signer.SignTokenAsync(TokenFactory.CreateIdentityToken("roclient", "valid"));
             var validator = Factory.CreateTokenValidator();
 
@@ -62,7 +61,7 @@ namespace Thinktecture.IdentityServer.Tests.Validation.Tokens
         [Trait("Category", Category)]
         public async Task Valid_IdentityToken_no_ClientId_supplied()
         {
-            var signer = new DefaultTokenSigningService(TestIdentityServerOptions.Create());
+            var signer = Factory.CreateDefaultTokenSigningService();
             var jwt = await signer.SignTokenAsync(TokenFactory.CreateIdentityToken("roclient", "valid"));
             var validator = Factory.CreateTokenValidator();
 
@@ -74,11 +73,24 @@ namespace Thinktecture.IdentityServer.Tests.Validation.Tokens
         [Trait("Category", Category)]
         public async Task IdentityToken_InvalidClientId()
         {
-            var signer = new DefaultTokenSigningService(TestIdentityServerOptions.Create());
+            var signer = Factory.CreateDefaultTokenSigningService();
             var jwt = await signer.SignTokenAsync(TokenFactory.CreateIdentityToken("roclient", "valid"));
             var validator = Factory.CreateTokenValidator();
 
             var result = await validator.ValidateIdentityTokenAsync(jwt, "invalid");
+            result.IsError.Should().BeTrue();
+            result.Error.Should().Be(Constants.ProtectedResourceErrors.InvalidToken);
+        }
+
+        [Fact]
+        [Trait("Category", Category)]
+        public async Task IdentityToken_Too_Long()
+        {
+            var signer = Factory.CreateDefaultTokenSigningService();
+            var jwt = await signer.SignTokenAsync(TokenFactory.CreateIdentityTokenLong("roclient", "valid", 1000));
+            var validator = Factory.CreateTokenValidator();
+
+            var result = await validator.ValidateIdentityTokenAsync(jwt, "roclient");
             result.IsError.Should().BeTrue();
             result.Error.Should().Be(Constants.ProtectedResourceErrors.InvalidToken);
         }

@@ -14,33 +14,29 @@
  * limitations under the License.
  */
 
+using IdentityServer3.Core.Configuration;
+using IdentityServer3.Core.Configuration.Hosting;
+using IdentityServer3.Core.Events;
+using IdentityServer3.Core.Extensions;
+using IdentityServer3.Core.Logging;
+using IdentityServer3.Core.Models;
+using IdentityServer3.Core.ResponseHandling;
+using IdentityServer3.Core.Results;
+using IdentityServer3.Core.Services;
+using IdentityServer3.Core.Validation;
+using IdentityServer3.Core.ViewModels;
 using System;
 using System.Collections.Specialized;
-using System.ComponentModel;
 using System.Net.Http;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using System.Web.Http;
-using Thinktecture.IdentityServer.Core.Configuration;
-using Thinktecture.IdentityServer.Core.Configuration.Hosting;
-using Thinktecture.IdentityServer.Core.Events;
-using Thinktecture.IdentityServer.Core.Extensions;
-using Thinktecture.IdentityServer.Core.Logging;
-using Thinktecture.IdentityServer.Core.Models;
-using Thinktecture.IdentityServer.Core.ResponseHandling;
-using Thinktecture.IdentityServer.Core.Results;
-using Thinktecture.IdentityServer.Core.Services;
-using Thinktecture.IdentityServer.Core.Validation;
-using Thinktecture.IdentityServer.Core.ViewModels;
 
-#pragma warning disable 1591
-
-namespace Thinktecture.IdentityServer.Core.Endpoints
+namespace IdentityServer3.Core.Endpoints
 {
     /// <summary>
     /// OAuth2/OpenID Connect authorize endpoint
     /// </summary>
-    [EditorBrowsable(EditorBrowsableState.Never)]
     [ErrorPageFilter]
     [HostAuthentication(Constants.PrimaryAuthenticationType)]
     [SecurityHeaders]
@@ -58,6 +54,7 @@ namespace Thinktecture.IdentityServer.Core.Endpoints
         private readonly ILocalizationService _localizationService;
         private readonly IEventService _events;
         private readonly AntiForgeryToken _antiForgeryToken;
+        private readonly ClientListCookie _clientListCookie;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="AuthorizeEndpointController" /> class.
@@ -70,6 +67,7 @@ namespace Thinktecture.IdentityServer.Core.Endpoints
         /// <param name="localizationService">The localization service.</param>
         /// <param name="events">The event service.</param>
         /// <param name="antiForgeryToken">The anti forgery token.</param>
+        /// <param name="clientListCookie">The client list cookie.</param>
         public AuthorizeEndpointController(
             IViewService viewService,
             AuthorizeRequestValidator validator,
@@ -78,7 +76,8 @@ namespace Thinktecture.IdentityServer.Core.Endpoints
             IdentityServerOptions options,
             ILocalizationService localizationService,
             IEventService events,
-            AntiForgeryToken antiForgeryToken)
+            AntiForgeryToken antiForgeryToken,
+            ClientListCookie clientListCookie)
         {
             _viewService = viewService;
             _options = options;
@@ -89,6 +88,7 @@ namespace Thinktecture.IdentityServer.Core.Endpoints
             _localizationService = localizationService;
             _events = events;
             _antiForgeryToken = antiForgeryToken;
+            _clientListCookie = clientListCookie;
         }
 
         /// <summary>
@@ -96,19 +96,10 @@ namespace Thinktecture.IdentityServer.Core.Endpoints
         /// </summary>
         /// <param name="request">The request.</param>
         /// <returns></returns>
-        [Route(Constants.RoutePaths.Oidc.Authorize, Name = Constants.RouteNames.Oidc.Authorize)]
+        [HttpGet]
         public async Task<IHttpActionResult> Get(HttpRequestMessage request)
         {
             Logger.Info("Start authorize request");
-
-            if (!_options.Endpoints.EnableAuthorizeEndpoint)
-            {
-                var error = "Endpoint is disabled. Aborting";
-                Logger.Warn(error);
-                RaiseFailureEvent(error);
-
-                return NotFound();
-            }
 
             var response = await ProcessRequestAsync(request.RequestUri.ParseQueryString());
 
@@ -123,9 +114,10 @@ namespace Thinktecture.IdentityServer.Core.Endpoints
             
             if (result.IsError)
             {
-                return this.AuthorizeError(
+                return await this.AuthorizeErrorAsync(
                     result.ErrorType,
                     result.Error,
+                    result.ErrorDescription,
                     result.ValidatedRequest);
             }
 
@@ -134,9 +126,10 @@ namespace Thinktecture.IdentityServer.Core.Endpoints
 
             if (loginInteraction.IsError)
             {
-                return this.AuthorizeError(
+                return await this.AuthorizeErrorAsync(
                     loginInteraction.Error.ErrorType,
                     loginInteraction.Error.Error,
+                    null,
                     request);
             }
             if (loginInteraction.IsLogin)
@@ -163,9 +156,10 @@ namespace Thinktecture.IdentityServer.Core.Endpoints
 
             if (consentInteraction.IsError)
             {
-                return this.AuthorizeError(
+                return await this.AuthorizeErrorAsync(
                     consentInteraction.Error.ErrorType,
                     consentInteraction.Error.Error,
+                    null,
                     request);
             }
 
@@ -178,7 +172,6 @@ namespace Thinktecture.IdentityServer.Core.Endpoints
             return await CreateAuthorizeResponseAsync(request);
         }
 
-        [Route(Constants.RoutePaths.Oidc.Consent, Name = Constants.RouteNames.Oidc.Consent)]
         [HttpPost]
         [ValidateAntiForgeryToken]
         public Task<IHttpActionResult> PostConsent(UserConsent model)
@@ -187,7 +180,6 @@ namespace Thinktecture.IdentityServer.Core.Endpoints
             return ProcessRequestAsync(Request.RequestUri.ParseQueryString(), model ?? new UserConsent());
         }
 
-        [Route(Constants.RoutePaths.Oidc.SwitchUser, Name = Constants.RouteNames.Oidc.SwitchUser)]
         [HttpGet]
         public async Task<IHttpActionResult> LoginAsDifferentUser()
         {
@@ -203,13 +195,19 @@ namespace Thinktecture.IdentityServer.Core.Endpoints
             if (request.ResponseMode == Constants.ResponseModes.Query ||
                 request.ResponseMode == Constants.ResponseModes.Fragment)
             {
-                RaiseSuccessEvent();
+                Logger.DebugFormat("Adding client {0} to client list cookie for subject {1}", request.ClientId, request.Subject.GetSubjectId());
+                _clientListCookie.AddClient(request.ClientId);
+
+                await RaiseSuccessEventAsync();
                 return new AuthorizeRedirectResult(response, _options);
             }
 
             if (request.ResponseMode == Constants.ResponseModes.FormPost)
             {
-                RaiseSuccessEvent();
+                Logger.DebugFormat("Adding client {0} to client list cookie for subject {1}", request.ClientId, request.Subject.GetSubjectId());
+                _clientListCookie.AddClient(request.ClientId);
+
+                await RaiseSuccessEventAsync();
                 return new AuthorizeFormPostResult(response, Request);
             }
 
@@ -251,7 +249,7 @@ namespace Thinktecture.IdentityServer.Core.Endpoints
                 AntiForgery = _antiForgeryToken.GetAntiForgeryToken()
             };
 
-            return new ConsentActionResult(_viewService, consentModel);
+            return new ConsentActionResult(_viewService, consentModel, validatedRequest);
         }
 
         IHttpActionResult RedirectToLogin(SignInMessage message, NameValueCollection parameters)
@@ -266,9 +264,9 @@ namespace Thinktecture.IdentityServer.Core.Endpoints
             return new LoginResult(Request.GetOwinContext().Environment, message);
         }
 
-        IHttpActionResult AuthorizeError(ErrorTypes errorType, string error, ValidatedAuthorizeRequest request)
+        async Task<IHttpActionResult> AuthorizeErrorAsync(ErrorTypes errorType, string error, string errorDescription, ValidatedAuthorizeRequest request)
         {
-            RaiseFailureEvent(error);
+            await RaiseFailureEventAsync(error);
 
             // show error message to user
             if (errorType == ErrorTypes.User)
@@ -295,6 +293,7 @@ namespace Thinktecture.IdentityServer.Core.Endpoints
 
                 IsError = true,
                 Error = error,
+                ErrorDescription = errorDescription,
                 State = request.State,
                 RedirectUri = request.RedirectUri
             };
@@ -309,14 +308,14 @@ namespace Thinktecture.IdentityServer.Core.Endpoints
             }
         }
 
-        private void RaiseSuccessEvent()
+        private async Task RaiseSuccessEventAsync()
         {
-            _events.RaiseSuccessfulEndpointEvent(EventConstants.EndpointNames.Authorize);
+            await _events.RaiseSuccessfulEndpointEventAsync(EventConstants.EndpointNames.Authorize);
         }
 
-        private void RaiseFailureEvent(string error)
+        private async Task RaiseFailureEventAsync(string error)
         {
-            _events.RaiseFailureEndpointEvent(EventConstants.EndpointNames.Authorize, error);
+            await _events.RaiseFailureEndpointEventAsync(EventConstants.EndpointNames.Authorize, error);
         }
 
         private string LookupErrorMessage(string error)

@@ -14,13 +14,13 @@
  * limitations under the License.
  */
 
+using IdentityServer3.Core.Extensions;
+using IdentityServer3.Core.Models;
+using IdentityServer3.Core.Validation;
 using System.Collections.Generic;
 using System.Linq;
-using Thinktecture.IdentityServer.Core.Extensions;
-using Thinktecture.IdentityServer.Core.Models;
-using Thinktecture.IdentityServer.Core.Validation;
 
-namespace Thinktecture.IdentityServer.Core.Logging
+namespace IdentityServer3.Core.Logging
 {
     internal class AuthorizeRequestValidationLog
     {
@@ -44,6 +44,7 @@ namespace Thinktecture.IdentityServer.Core.Logging
         public int? MaxAge { get; set; }
         public string LoginHint { get; set; }
         public string SessionId { get; set; }
+        public string CodeChallengeMethod { get; set; }
 
         public Dictionary<string, string> Raw { get; set; }
 
@@ -91,6 +92,7 @@ namespace Thinktecture.IdentityServer.Core.Logging
             LoginHint = request.LoginHint;
             MaxAge = request.MaxAge;
             SessionId = request.SessionId;
+            CodeChallengeMethod = request.CodeChallengeMethod;
         }
     }
 }

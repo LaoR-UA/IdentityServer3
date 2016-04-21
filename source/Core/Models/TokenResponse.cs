@@ -14,18 +14,29 @@
  * limitations under the License.
  */
 
+using System.Collections.Generic;
 using System.ComponentModel;
 
 #pragma warning disable 1591
 
-namespace Thinktecture.IdentityServer.Core.Models
+namespace IdentityServer3.Core.Models
 {
     [EditorBrowsable(EditorBrowsableState.Never)]
     public class TokenResponse
     {
+        public string TokenType { get; set; }
         public string IdentityToken { get; set; }
         public string AccessToken { get; set; }
         public int AccessTokenLifetime { get; set; }
         public string RefreshToken { get; set; }
+        public string Algorithm { get; set; }
+
+        public Dictionary<string, object> Custom { get; set; }
+
+        public TokenResponse()
+        {
+            TokenType = Constants.ResponseTokenTypes.Bearer;
+            Custom = new Dictionary<string, object>();
+        }
     }
 }

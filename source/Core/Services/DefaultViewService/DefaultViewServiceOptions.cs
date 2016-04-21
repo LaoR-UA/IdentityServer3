@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
+using IdentityServer3.Core.Configuration;
 using System.Collections.Generic;
-using Thinktecture.IdentityServer.Core.Configuration;
 
-namespace Thinktecture.IdentityServer.Core.Services.Default
+namespace IdentityServer3.Core.Services.Default
 {
     /// <summary>
     /// Configures the assets for the default view service.
@@ -70,5 +70,14 @@ namespace Thinktecture.IdentityServer.Core.Services.Default
         ///   <c>true</c> if [cache views]; otherwise, <c>false</c>.
         /// </value>
         public bool CacheViews { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating the path to the filesystem directory that contain custom views. 
+        /// This value is only used when the ViewLoader property has not been explicitly set.
+        /// </summary>
+        /// <value>
+        ///  The filesystem path to the views directory.
+        /// </value>
+        public string CustomViewDirectory { get; set; }
     }
 }
